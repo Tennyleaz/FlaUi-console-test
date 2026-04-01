@@ -581,7 +581,7 @@ namespace FlaConsole
             Console.WriteLine($"  pid: {summary.Pid}");
             Console.WriteLine($"  path: {summary.Path}");
             Console.WriteLine($"  controlType: {summary.ControlType}");
-            Console.WriteLine($"  name: {summary.Name}");
+            Console.WriteLine($"  name: \"{summary.Name}\"");
             Console.WriteLine($"  automationId: {summary.AutomationId}");
             Console.WriteLine($"  enabled: {summary.Enabled}");
         }
@@ -706,8 +706,8 @@ namespace FlaConsole
                     Console.WriteLine("  flaui list [--json]");
                     Console.WriteLine("  flaui tree --pid <pid> [--depth <n>] [--max-items <n>] [--json]");
                     Console.WriteLine("  flaui find --pid <pid> --path <i1,i2,...> [--require-match] [--fallback] [--json]");
-                    Console.WriteLine("  flaui click --pid <pid> --path <i1,i2,...> [--dry-run] [--json]");
                     Console.WriteLine("  flaui subtree --pid <pid> --path <i1,i2,...> [--depth <n>] [--max-items <n>] [--json]");
+                    Console.WriteLine("  flaui click --pid <pid> --path <i1,i2,...> [--dry-run] [--json]");
                     Console.WriteLine();
                     Console.WriteLine("Path uses comma-separated indexes and index 0 is the root.");
                     break;
