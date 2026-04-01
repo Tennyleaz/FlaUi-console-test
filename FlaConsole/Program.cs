@@ -1,9 +1,10 @@
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Definitions;
+using FlaUI.UIA3;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using FlaUI.Core.AutomationElements;
-using FlaUI.UIA3;
 
 namespace FlaConsole
 {
@@ -18,8 +19,9 @@ namespace FlaConsole
             List,
             Tree,
             Find,
-            Click,
             Subtree,
+            Click,
+            TextInput,
             Help
         }
 
@@ -35,6 +37,7 @@ namespace FlaConsole
             public bool ShowHelp;
             public bool RequireMatch;
             public bool UseFallback;
+            public string Text;
         }
 
         private sealed class WindowSession : IDisposable
@@ -84,6 +87,8 @@ namespace FlaConsole
                     return HandleClick(request);
                 case CliCommand.Subtree:
                     return HandleSubtree(request);
+                case CliCommand.TextInput:
+                    return HandleTextInput(request);
                 default:
                     return HandleUnknownOrHelp(request);
             }
@@ -297,6 +302,75 @@ namespace FlaConsole
             return 0;
         }
 
+        private static int HandleTextInput(CliRequest request)
+        {
+            if (!TryOpenWindow(request.Pid.Value, out var session, out var reason))
+            {
+                PrintFailure("click", reason, request.UseJson, request.Path, request.Pid.Value);
+                return 1;
+            }
+
+            using (session)
+            {
+                var element = FindElementByIndexSequence(session.Window, request.Path, out var foundReason);
+                if (element == null)
+                {
+                    PrintFailure("click", foundReason ?? "Element not found.", request.UseJson, request.Path, request.Pid.Value);
+                    return 1;
+                }
+
+                if (request.UseJson)
+                {
+                    if (request.DryRun)
+                    {
+                        Console.WriteLine(BuildElementInfoJson(request.Pid.Value, request.Path, element));
+                        return 0;
+                    }
+
+                    try
+                    {
+                        var textbox = element.AsTextBox();
+                        Console.WriteLine("textbox Text:" + textbox.Text);
+                        textbox.Focus();
+                        Console.WriteLine("textbox Focused");
+                        textbox.Enter(request.Text);
+                        Console.WriteLine("Text executed.");
+                    }
+                    catch (Exception ex)
+                    {
+                        PrintFailure("click", $"Input failed: {ex.GetType().Name}: {ex.Message}", request.UseJson, request.Path, request.Pid.Value);
+                        return 1;
+                    }
+                }
+                else
+                {
+                    PrintElementSummary(request.Pid.Value, request.Path, element);
+                    if (request.DryRun)
+                    {
+                        Console.WriteLine("Dry-run enabled, skip text input.");
+                        return 0;
+                    }
+
+                    try
+                    {
+                        var textbox = element.AsTextBox();
+                        Console.WriteLine("textbox got");
+                        textbox.Focus();
+                        Console.WriteLine("textbox Focused");
+                        textbox.Enter(request.Text);
+                        Console.WriteLine("Text executed.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Input failed: {ex.GetType().Name}: {ex.Message}");
+                        return 1;
+                    }
+                }
+            }
+
+            return 0;
+        }
+
         private static bool TryParseArguments(string[] args, out CliRequest request, out string error)
         {
             request = new CliRequest();
@@ -403,6 +477,14 @@ namespace FlaConsole
                     case "help":
                         request.ShowHelp = true;
                         break;
+                    case "text":
+                        if (string.IsNullOrWhiteSpace(value))
+                        {
+                            error = "Invalid --text, must be non empty text.";
+                            return false;
+                        }
+                        request.Text = value;
+                        break;
                     default:
                         error = $"Unknown option '--{option}'.";
                         return false;
@@ -457,6 +539,9 @@ namespace FlaConsole
                     return true;
                 case "help":
                     command = CliCommand.Help;
+                    return true;
+                case "textinput":
+                    command = CliCommand.TextInput;
                     return true;
                 default:
                     return false;
@@ -708,6 +793,7 @@ namespace FlaConsole
                     Console.WriteLine("  flaui find --pid <pid> --path <i1,i2,...> [--require-match] [--fallback] [--json]");
                     Console.WriteLine("  flaui subtree --pid <pid> --path <i1,i2,...> [--depth <n>] [--max-items <n>] [--json]");
                     Console.WriteLine("  flaui click --pid <pid> --path <i1,i2,...> [--dry-run] [--json]");
+                    Console.WriteLine("  flaui textinput --pid <pid> --path <i1,i2,...> --text <input> [--dry-run] [--json]");
                     Console.WriteLine();
                     Console.WriteLine("Path uses comma-separated indexes and index 0 is the root.");
                     break;
