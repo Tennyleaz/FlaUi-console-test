@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -7,10 +8,19 @@ using System.Threading.Tasks;
 
 namespace FlaConsole
 {
+    internal sealed class WindowInfo
+    {
+        public int Pid;
+        public IntPtr Handle;
+        public string Title;
+        public string ProcessName;
+    }
+
     internal class WindowPids
     {
-        public static IReadOnlyCollection<uint> GetPidsWithTopLevelWindows(bool onlyVisible = true)
+        public static IReadOnlyCollection<WindowInfo> GetPidsWithTopLevelWindows(bool onlyVisible = true)
         {
+            var result = new List<WindowInfo>();
             var pids = new HashSet<uint>();
 
             EnumWindows((hWnd, lParam) =>
@@ -22,13 +32,29 @@ namespace FlaConsole
                 GetWindowThreadProcessId(hWnd, out uint pid);
                 if (pid != 0)
                 {
-                    pids.Add(pid);
+                    // Check unique process id
+                    if (!pids.Contains(pid))
+                    {
+                        // Get its name
+                        using (Process process = Process.GetProcessById((int)pid))
+                        {
+                            WindowInfo windowInfo = new WindowInfo
+                            {
+                                Pid = (int)pid,
+                                Handle = hWnd,
+                                Title = process.MainWindowTitle,
+                                ProcessName = process.ProcessName,
+                            };
+                            result.Add(windowInfo);
+                        }
+                        pids.Add(pid);
+                    }
                 }
 
                 return true; // continue enumeration
             }, IntPtr.Zero);
 
-            return pids;
+            return result;
         }
 
         private static bool IsCandidateTopLevelWindow(IntPtr hWnd)
