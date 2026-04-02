@@ -1,10 +1,15 @@
 using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Capturing;
 using FlaUI.Core.Definitions;
 using FlaUI.UIA3;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
+using System.Windows.Media.Imaging;
 
 namespace FlaConsole
 {
@@ -22,6 +27,7 @@ namespace FlaConsole
             Subtree,
             Click,
             TextInput,
+            Capture,
             Help
         }
 
@@ -89,10 +95,14 @@ namespace FlaConsole
                     return HandleSubtree(request);
                 case CliCommand.TextInput:
                     return HandleTextInput(request);
+                case CliCommand.Capture:
+                    return HandleCapture(request);
                 default:
                     return HandleUnknownOrHelp(request);
             }
         }
+
+        #region Every command section
 
         private static int HandleUnknownOrHelp(CliRequest request)
         {
@@ -304,9 +314,14 @@ namespace FlaConsole
 
         private static int HandleTextInput(CliRequest request)
         {
+            if (string.IsNullOrWhiteSpace(request.Text))
+            {
+                Console.WriteLine("Empty text in --text argument.");
+                return 1;
+            }
             if (!TryOpenWindow(request.Pid.Value, out var session, out var reason))
             {
-                PrintFailure("click", reason, request.UseJson, request.Path, request.Pid.Value);
+                PrintFailure("textinput", reason, request.UseJson, request.Path, request.Pid.Value);
                 return 1;
             }
 
@@ -315,7 +330,7 @@ namespace FlaConsole
                 var element = FindElementByIndexSequence(session.Window, request.Path, out var foundReason);
                 if (element == null)
                 {
-                    PrintFailure("click", foundReason ?? "Element not found.", request.UseJson, request.Path, request.Pid.Value);
+                    PrintFailure("textinput", foundReason ?? "Element not found.", request.UseJson, request.Path, request.Pid.Value);
                     return 1;
                 }
 
@@ -338,7 +353,7 @@ namespace FlaConsole
                     }
                     catch (Exception ex)
                     {
-                        PrintFailure("click", $"Input failed: {ex.GetType().Name}: {ex.Message}", request.UseJson, request.Path, request.Pid.Value);
+                        PrintFailure("textinput", $"Input failed: {ex.GetType().Name}: {ex.Message}", request.UseJson, request.Path, request.Pid.Value);
                         return 1;
                     }
                 }
@@ -358,7 +373,7 @@ namespace FlaConsole
                         textbox.Focus();
                         Console.WriteLine("textbox Focused");
                         textbox.Enter(request.Text);
-                        Console.WriteLine("Text executed.");
+                        Console.WriteLine("Text executed. Now is: " + textbox.Text);
                     }
                     catch (Exception ex)
                     {
@@ -370,6 +385,59 @@ namespace FlaConsole
 
             return 0;
         }
+
+        private static int HandleCapture(CliRequest request)
+        {
+            if (!TryOpenWindow(request.Pid.Value, out var session, out var reason))
+            {
+                PrintFailure("capture", reason, request.UseJson, request.Path, request.Pid.Value);
+                return 1;
+            }
+
+            using (session)
+            {
+                try
+                {
+                    // Create dir and path
+                    string pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+                    string dir = Path.Combine(pictures, "FlaScreenshot");
+                    Directory.CreateDirectory(dir);
+                    string fileName = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + ".png";
+                    fileName = Path.Combine(dir, fileName);
+
+                    // Find the target
+                    var element = FindElementByIndexSequence(session.Window, request.Path, out var _);
+                    if (element == null)
+                    {
+                        element = session.Window;
+                        Console.WriteLine($"Element {request.Path} not found. Use whole winodw instead.");
+                    }
+
+                    // Do capture
+                    session.Window.Focus();
+                    var cap = Capture.Element(element, new CaptureSettings());
+
+                    // Save it
+                    BitmapEncoder encoder = new PngBitmapEncoder();
+                    encoder.Frames.Add(BitmapFrame.Create(cap.BitmapImage));
+                    using (var fileStream = new FileStream(fileName, FileMode.Create))
+                    {
+                        encoder.Save(fileStream);
+                    }
+                    Console.WriteLine("Captured image: " + fileName);
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Capture failed: {ex.GetType().Name}: {ex.Message}");
+                    return 1;
+                }
+            }
+        }
+
+        #endregion
+
+        #region Argument parsing
 
         private static bool TryParseArguments(string[] args, out CliRequest request, out string error)
         {
@@ -543,27 +611,12 @@ namespace FlaConsole
                 case "textinput":
                     command = CliCommand.TextInput;
                     return true;
+                case "capture":
+                    command = CliCommand.Capture;
+                    return true;
                 default:
                     return false;
             }
-        }
-
-        private static string BuildSubTreeJson(int pid, int[] rootPath, int depth, IReadOnlyList<string> lines)
-        {
-            var sb = new StringBuilder();
-            sb.Append("{\"command\":\"subtree\",");
-            sb.Append("\"pid\":").Append(pid).Append(",");
-            sb.Append("\"rootPath\":\"").Append(EscapeJson(PrintUiTreeNodePath(rootPath))).Append("\",");
-            sb.Append("\"depth\":").Append(depth).Append(",");
-            sb.Append("\"items\":[");
-            for (int i = 0; i < lines.Count; i++)
-            {
-                if (i > 0)
-                    sb.Append(',');
-                sb.Append('"').Append(EscapeJson(lines[i])).Append('"');
-            }
-            sb.Append("]}");
-            return sb.ToString();
         }
 
         private static bool TryParsePath(string rawPath, out int[] path, out string error)
@@ -592,6 +645,26 @@ namespace FlaConsole
 
             path = indexes.ToArray();
             return path.Length > 0;
+        }
+
+        #endregion
+
+        private static string BuildSubTreeJson(int pid, int[] rootPath, int depth, IReadOnlyList<string> lines)
+        {
+            var sb = new StringBuilder();
+            sb.Append("{\"command\":\"subtree\",");
+            sb.Append("\"pid\":").Append(pid).Append(",");
+            sb.Append("\"rootPath\":\"").Append(EscapeJson(PrintUiTreeNodePath(rootPath))).Append("\",");
+            sb.Append("\"depth\":").Append(depth).Append(",");
+            sb.Append("\"items\":[");
+            for (int i = 0; i < lines.Count; i++)
+            {
+                if (i > 0)
+                    sb.Append(',');
+                sb.Append('"').Append(EscapeJson(lines[i])).Append('"');
+            }
+            sb.Append("]}");
+            return sb.ToString();
         }
 
         private static bool TryOpenWindow(int pid, out WindowSession session, out string reason)
@@ -786,6 +859,12 @@ namespace FlaConsole
                 case CliCommand.Subtree:
                     Console.WriteLine("Usage: flaui subtree --pid <pid> --path <i1,i2,...> [--depth <n>] [--max-items <n>] [--json]");
                     break;
+                case CliCommand.TextInput:
+                    Console.WriteLine("Usage: flaui textinput --pid <pid> --path <i1,i2,...> --text <input> [--dry-run] [--json]");
+                    break;
+                case CliCommand.Capture:
+                    Console.WriteLine("Usage: flaui capture --pid <pid> --path <i1,i2,...>");
+                    break;
                 default:
                     Console.WriteLine("Usage:");
                     Console.WriteLine("  flaui list [--json]");
@@ -794,6 +873,7 @@ namespace FlaConsole
                     Console.WriteLine("  flaui subtree --pid <pid> --path <i1,i2,...> [--depth <n>] [--max-items <n>] [--json]");
                     Console.WriteLine("  flaui click --pid <pid> --path <i1,i2,...> [--dry-run] [--json]");
                     Console.WriteLine("  flaui textinput --pid <pid> --path <i1,i2,...> --text <input> [--dry-run] [--json]");
+                    Console.WriteLine("  flaui capture --pid <pid> --path <i1,i2,...>");
                     Console.WriteLine();
                     Console.WriteLine("Path uses comma-separated indexes and index 0 is the root.");
                     break;
